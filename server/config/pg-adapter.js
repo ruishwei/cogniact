@@ -1,7 +1,50 @@
-/**
- * PostgreSQL adapter that mimics the Supabase PostgREST query builder interface.
- * This allows routes to use the same .from().select().eq()... syntax regardless of DB mode.
- */
+const FK_MAP = {
+  skills:          { users: 'author_id' },
+  conversations:   { agents: 'agent_id', users: 'user_id' },
+  scheduled_tasks: { agents: 'agent_id' },
+  agent_skills:    { agents: 'agent_id', skills: 'skill_id' },
+  messages:        { conversations: 'conversation_id' },
+  browser_sessions:{ agents: 'agent_id', users: 'user_id' },
+  task_executions: { scheduled_tasks: 'task_id' },
+  knowledge_base:  { agents: 'agent_id', users: 'user_id' },
+};
+
+const REVERSE_FK_MAP = {
+  conversations: { messages: 'conversation_id' },
+  scheduled_tasks: { task_executions: 'task_id' },
+  agents: { agent_skills: 'agent_id' },
+};
+
+function parseSelectCols(selectStr) {
+  const joins = [];
+  let baseCols = [];
+  let depth = 0;
+  let current = '';
+
+  for (const ch of selectStr) {
+    if (ch === '(') depth++;
+    if (ch === ')') depth--;
+    if (ch === ',' && depth === 0) {
+      baseCols.push(current.trim());
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  if (current.trim()) baseCols.push(current.trim());
+
+  const remaining = [];
+  for (const part of baseCols) {
+    const m = part.match(/^(\w+)\((.+)\)$/);
+    if (m) {
+      joins.push({ table: m[1], cols: m[2].trim() });
+    } else {
+      remaining.push(part);
+    }
+  }
+
+  return { baseCols: remaining.join(', '), joins };
+}
 
 class PgQueryBuilder {
   constructor(pool, table) {
@@ -42,30 +85,34 @@ class PgQueryBuilder {
     return this;
   }
 
+  _q(col) {
+    return `"${this._table}"."${col}"`;
+  }
+
   eq(col, val) {
     const idx = this._params.length + 1;
-    this._wheres.push(`"${col}" = $${idx}`);
+    this._wheres.push(`${this._q(col)} = $${idx}`);
     this._params.push(val);
     return this;
   }
 
   neq(col, val) {
     const idx = this._params.length + 1;
-    this._wheres.push(`"${col}" != $${idx}`);
+    this._wheres.push(`${this._q(col)} != $${idx}`);
     this._params.push(val);
     return this;
   }
 
   lte(col, val) {
     const idx = this._params.length + 1;
-    this._wheres.push(`"${col}" <= $${idx}`);
+    this._wheres.push(`${this._q(col)} <= $${idx}`);
     this._params.push(val);
     return this;
   }
 
   gte(col, val) {
     const idx = this._params.length + 1;
-    this._wheres.push(`"${col}" >= $${idx}`);
+    this._wheres.push(`${this._q(col)} >= $${idx}`);
     this._params.push(val);
     return this;
   }
@@ -78,7 +125,7 @@ class PgQueryBuilder {
       const val = rawVal === 'true' ? true : rawVal === 'false' ? false : rawVal;
       const idx = this._params.length + 1;
       this._params.push(val);
-      return `"${col}" ${op === 'eq' ? '=' : '!='} $${idx}`;
+      return `${this._q(col)} ${op === 'eq' ? '=' : '!='} $${idx}`;
     }).filter(Boolean);
 
     if (parts.length > 0) {
@@ -89,7 +136,7 @@ class PgQueryBuilder {
 
   textSearch(col, val) {
     const idx = this._params.length + 1;
-    this._wheres.push(`to_tsvector('english', "${col}") @@ plainto_tsquery('english', $${idx})`);
+    this._wheres.push(`to_tsvector('english', ${this._q(col)}) @@ plainto_tsquery('english', $${idx})`);
     this._params.push(val);
     return this;
   }
@@ -124,10 +171,46 @@ class PgQueryBuilder {
 
   async _run() {
     if (this._op === 'select') {
+      const { baseCols, joins } = parseSelectCols(this._cols);
+      const fkInfo = FK_MAP[this._table] || {};
+
+      let selectParts = [];
+      if (baseCols === '*') {
+        selectParts.push(`"${this._table}".*`);
+      } else {
+        selectParts.push(baseCols.split(',').map(c => `"${this._table}"."${c.trim()}"`).join(', '));
+      }
+
+      let joinSql = '';
+      const reverseInfo = REVERSE_FK_MAP[this._table] || {};
+
+      for (const j of joins) {
+        const fkCol = fkInfo[j.table];
+        const reverseFkCol = reverseInfo[j.table];
+
+        if (fkCol) {
+          const alias = `_j_${j.table}`;
+          joinSql += ` LEFT JOIN "${j.table}" AS "${alias}" ON "${this._table}"."${fkCol}" = "${alias}"."id"`;
+
+          if (j.cols === '*') {
+            selectParts.push(`row_to_json("${alias}") AS "${j.table}"`);
+          } else {
+            const colList = j.cols.split(',').map(c => c.trim());
+            const jsonParts = colList.map(c => `'${c}', "${alias}"."${c}"`).join(', ');
+            selectParts.push(`json_build_object(${jsonParts}) AS "${j.table}"`);
+          }
+        } else if (reverseFkCol) {
+          const subCols = j.cols === '*' ? '*' : j.cols.split(',').map(c => `"${c.trim()}"`).join(', ');
+          selectParts.push(
+            `COALESCE((SELECT json_agg(sub) FROM (SELECT ${subCols} FROM "${j.table}" WHERE "${j.table}"."${reverseFkCol}" = "${this._table}"."id") sub), '[]'::json) AS "${j.table}"`
+          );
+        }
+      }
+
       let whereSql = this._wheres.length > 0 ? ` WHERE ${this._wheres.join(' AND ')}` : '';
-      let orderSql = this._order ? ` ORDER BY "${this._order}" ${this._orderAsc ? 'ASC' : 'DESC'}` : '';
+      let orderSql = this._order ? ` ORDER BY "${this._table}"."${this._order}" ${this._orderAsc ? 'ASC' : 'DESC'}` : '';
       let limitSql = this._limitN ? ` LIMIT ${this._limitN}` : '';
-      const sql = `SELECT ${this._cols} FROM "${this._table}"${whereSql}${orderSql}${limitSql}`;
+      const sql = `SELECT ${selectParts.join(', ')} FROM "${this._table}"${joinSql}${whereSql}${orderSql}${limitSql}`;
       const res = await this._pool.query(sql, this._params);
 
       if (this._returnMode === 'single') {
