@@ -1,11 +1,23 @@
 import cron from 'node-cron';
+import { isPostgresMode, getDb } from '../config/db.js';
 import { supabase } from '../config/supabase.js';
+import { createPgAdapter } from '../config/pg-adapter.js';
 
-const scheduledJobs = new Map();
+let dbClient = null;
+
+async function getQueryClient() {
+  if (dbClient) return dbClient;
+  if (isPostgresMode()) {
+    const pool = await getDb();
+    dbClient = createPgAdapter(pool);
+  } else {
+    dbClient = supabase;
+  }
+  return dbClient;
+}
 
 export function initializeScheduler() {
   console.log('Initializing task scheduler...');
-
   cron.schedule('* * * * *', async () => {
     await checkAndExecuteTasks();
   });
@@ -13,7 +25,8 @@ export function initializeScheduler() {
 
 async function checkAndExecuteTasks() {
   try {
-    const { data: tasks, error } = await supabase
+    const client = await getQueryClient();
+    const { data: tasks, error } = await client
       .from('scheduled_tasks')
       .select('*')
       .eq('enabled', true)
@@ -24,118 +37,60 @@ async function checkAndExecuteTasks() {
       return;
     }
 
-    for (const task of tasks) {
-      await executeTask(task);
+    for (const task of (tasks || [])) {
+      await executeTask(task, client);
     }
   } catch (error) {
     console.error('Check and execute tasks error:', error);
   }
 }
 
-async function executeTask(task) {
+async function executeTask(task, client) {
   try {
-    const executionId = await createExecution(task.id);
+    const { data: exec } = await client
+      .from('task_executions')
+      .insert({
+        task_id: task.id,
+        status: 'running',
+        started_at: new Date().toISOString(),
+      })
+      .single();
+
+    const executionId = exec?.id;
 
     let result = {};
     let status = 'success';
-    let error = null;
+    let taskError = null;
 
     try {
       switch (task.task_type) {
-        case 'login':
-          result = await executeLoginTask(task);
-          break;
-        case 'check':
-          result = await executeCheckTask(task);
-          break;
-        case 'report':
-          result = await executeReportTask(task);
-          break;
-        case 'custom':
-          result = await executeCustomTask(task);
-          break;
-        default:
-          throw new Error(`Unknown task type: ${task.task_type}`);
+        case 'login':  result = { message: 'Login task executed', timestamp: new Date().toISOString() }; break;
+        case 'check':  result = { message: 'Check task executed', timestamp: new Date().toISOString() }; break;
+        case 'report': result = { message: 'Report task executed', timestamp: new Date().toISOString() }; break;
+        default:       result = { message: `Task type ${task.task_type} executed` };
       }
     } catch (err) {
       status = 'failed';
-      error = err.message;
-      console.error(`Task execution error [${task.id}]:`, err);
+      taskError = err.message;
     }
 
-    await completeExecution(executionId, status, result, error);
+    if (executionId) {
+      await client.from('task_executions').update({
+        status,
+        completed_at: new Date().toISOString(),
+        result,
+        error: taskError,
+      }).eq('id', executionId);
+    }
 
-    const nextRunAt = calculateNextRun(task.schedule);
-    await supabase
-      .from('scheduled_tasks')
-      .update({
-        last_run_at: new Date().toISOString(),
-        next_run_at: nextRunAt.toISOString(),
-      })
-      .eq('id', task.id);
+    const nextRunAt = new Date();
+    nextRunAt.setMinutes(nextRunAt.getMinutes() + 1);
+
+    await client.from('scheduled_tasks').update({
+      last_run_at: new Date().toISOString(),
+      next_run_at: nextRunAt.toISOString(),
+    }).eq('id', task.id);
   } catch (error) {
     console.error('Execute task error:', error);
   }
-}
-
-async function createExecution(taskId) {
-  const { data, error } = await supabase
-    .from('task_executions')
-    .insert({
-      task_id: taskId,
-      status: 'running',
-      started_at: new Date().toISOString(),
-    })
-    .select()
-    .single();
-
-  if (error) throw error;
-
-  return data.id;
-}
-
-async function completeExecution(executionId, status, result, error) {
-  await supabase
-    .from('task_executions')
-    .update({
-      status,
-      completed_at: new Date().toISOString(),
-      result,
-      error,
-    })
-    .eq('id', executionId);
-}
-
-function calculateNextRun(cronExpression) {
-  const now = new Date();
-  now.setMinutes(now.getMinutes() + 1);
-  return now;
-}
-
-async function executeLoginTask(task) {
-  return {
-    message: 'Login task executed',
-    timestamp: new Date().toISOString(),
-  };
-}
-
-async function executeCheckTask(task) {
-  return {
-    message: 'Check task executed',
-    timestamp: new Date().toISOString(),
-  };
-}
-
-async function executeReportTask(task) {
-  return {
-    message: 'Report task executed',
-    timestamp: new Date().toISOString(),
-  };
-}
-
-async function executeCustomTask(task) {
-  return {
-    message: 'Custom task executed',
-    timestamp: new Date().toISOString(),
-  };
 }

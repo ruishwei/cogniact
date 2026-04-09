@@ -4,18 +4,18 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const supabaseUrl = process.env.VITE_SUPABASE_URL;
-const supabaseKey = process.env.VITE_SUPABASE_SUPABASE_ANON_KEY;
+const supabaseKey = process.env.VITE_SUPABASE_SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
 
-if (!supabaseUrl || !supabaseKey) {
-  throw new Error('Missing Supabase environment variables');
+export let supabase = null;
+
+if (supabaseUrl && supabaseKey) {
+  supabase = createClient(supabaseUrl, supabaseKey);
 }
 
-export const supabase = createClient(supabaseUrl, supabaseKey);
-
 export const getSupabaseClient = (accessToken) => {
-  if (!accessToken) {
-    return supabase;
-  }
+  if (!supabaseUrl || !supabaseKey) return null;
+
+  if (!accessToken) return supabase;
 
   return createClient(supabaseUrl, supabaseKey, {
     global: {
