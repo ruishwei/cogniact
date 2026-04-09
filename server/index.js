@@ -13,6 +13,7 @@ import fileRoutes from './routes/files.js';
 import authRoutes from './routes/auth.js';
 import { handleWebSocketConnection } from './services/websocket.js';
 import { initializeScheduler } from './services/scheduler.js';
+import { getDb, isPostgresMode } from './config/db.js';
 
 dotenv.config();
 
@@ -48,9 +49,19 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 3000;
 
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  initializeScheduler();
+async function start() {
+  if (isPostgresMode()) {
+    await getDb();
+  }
+  server.listen(PORT, () => {
+    console.log(`Server running on port ${PORT} [DB_MODE=${process.env.DB_MODE || 'supabase'}]`);
+    initializeScheduler();
+  });
+}
+
+start().catch(err => {
+  console.error('Failed to start server:', err.message);
+  process.exit(1);
 });
 
 export { wss };
