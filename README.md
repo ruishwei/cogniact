@@ -1,115 +1,93 @@
 # Cloud Agent Browser System
 
-A powerful cloud-based intelligent agent browser system with multi-user support, enabling intelligent automation, browser session management, and extensible skills.
+A cloud-based intelligent agent platform with multi-user support, browser automation, extensible skills, and a natural language chat interface.
 
 ## Features
 
-### Core Capabilities
-- **Multi-User Support**: Full authentication and user management
-- **Intelligent Agents**: Create and manage AI-powered agents with configurable models
-- **Virtual Browser**: Automated browser sessions with Playwright
-- **Chat Interface**: Natural language conversations with agents
-- **Skills System**: Extensible skill framework for custom functionality
-- **Knowledge Base**: Learned knowledge and documentation management
-- **Scheduled Tasks**: Automated recurring operations
-- **File Processing**: Upload, download, and process documents
-
-### Agent Capabilities
-- Web browsing and automation
-- File analysis (Word, PDF, ZIP, etc.)
-- Information extraction and summarization
-- Automated form filling and submissions
-- Document drafting with reference search
-- Website monitoring and reporting
-- Custom skill execution
+- **Multi-User Authentication**: Register and log in with email/password; JWT sessions auto-managed
+- **Intelligent Agents**: Create AI-powered agents with configurable models and system prompts
+- **Virtual Browser**: Automated browser sessions via Playwright — navigate, fill forms, capture screenshots
+- **Chat Interface**: Natural language conversations with agents in real time
+- **Skills System**: Extensible custom JavaScript skills that can be assigned to agents
+- **Knowledge Base**: Store and retrieve documentation, notes, and learned experiences
+- **Scheduled Tasks**: Cron-based recurring operations (monitoring, data collection, etc.)
+- **File Processing**: Upload and process Word, PDF, ZIP, and other document formats
 
 ## Technology Stack
 
-### Backend
-- **Node.js + Express**: RESTful API server
-- **Supabase/PostgreSQL**: Database with Row Level Security
-- **Playwright**: Browser automation
-- **WebSocket**: Real-time communication
-
-### Frontend
-- **Vue.js 3**: Modern reactive UI framework
-- **Pinia**: State management
-- **Vue Router**: Client-side routing
-- **Axios**: HTTP client
+| Layer | Technologies |
+|---|---|
+| Backend | Node.js, Express, WebSocket |
+| Database | Supabase (PostgreSQL + Row Level Security) |
+| Browser Automation | Playwright |
+| Frontend | Vue.js 3, Pinia, Vue Router, Axios |
 
 ## Getting Started
 
 ### Prerequisites
+
 - Node.js 18+
-- PostgreSQL database (or use Supabase)
-- npm or yarn
+- A Supabase project (or a PostgreSQL database)
+- npm
 
 ### Installation
 
 1. Install dependencies:
+
 ```bash
 npm install
 ```
 
-2. Configure environment variables in `.env`:
+2. Copy `.env` and fill in your Supabase connection values:
+
 ```
 VITE_SUPABASE_URL=your_supabase_url
-VITE_SUPABASE_SUPABASE_ANON_KEY=your_supabase_anon_key
+VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
 ```
 
-3. Install Playwright browsers:
+> When using PostgreSQL mode (`DB_MODE=postgres`), set `DATABASE_URL`. The JWT secret is **auto-generated** on first run and stored in the database — no manual configuration needed.
+
+3. Install Playwright browsers (only needed for browser automation):
+
 ```bash
 npx playwright install
 ```
 
-4. Run the development server:
+4. Start the development server:
+
 ```bash
 npm run dev
 ```
 
-This starts both the backend (port 3000) and frontend (port 5173).
+Backend runs on port **3000**, frontend on port **5173**.
 
-## Key Features
+## Database Modes
 
-### 1. Intelligent Agents
-Create AI-powered agents with customizable system prompts and capabilities. Agents can browse the web, process files, and execute custom skills.
+| Mode | Config | Notes |
+|---|---|---|
+| Supabase (default) | `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` | Uses Supabase auth and RLS |
+| PostgreSQL | `DB_MODE=postgres` + `DATABASE_URL` | Self-hosted; JWT secret auto-generated |
 
-### 2. Virtual Browser
-Automated browser sessions using Playwright. Agents can navigate websites, interact with pages, fill forms, and capture screenshots.
+## API Endpoints
 
-### 3. Knowledge Management
-Build a knowledge base from documentation, user interactions, and learned experiences. Agents use this knowledge to provide better responses.
-
-### 4. Skills System
-Extend agent capabilities with custom JavaScript skills. Skills can be public or private, and easily assigned to agents.
-
-### 5. Scheduled Tasks
-Automate recurring operations like login checks, data collection, and report generation with cron-based scheduling.
-
-## API Documentation
-
-See the full API documentation in the code comments. Key endpoints:
-
-- `/api/auth/*` - Authentication
-- `/api/agents/*` - Agent management
-- `/api/conversations/*` - Chat conversations
-- `/api/browser/*` - Browser sessions
-- `/api/skills/*` - Skills management
-- `/api/knowledge/*` - Knowledge base
-- `/api/tasks/*` - Scheduled tasks
+| Prefix | Description |
+|---|---|
+| `/api/auth/*` | Registration, login, session |
+| `/api/agents/*` | Agent CRUD and configuration |
+| `/api/conversations/*` | Chat history and messaging |
+| `/api/browser/*` | Browser session control |
+| `/api/skills/*` | Custom skill management |
+| `/api/knowledge/*` | Knowledge base entries |
+| `/api/tasks/*` | Scheduled task management |
+| `/api/files/*` | File upload and processing |
 
 ## Security
 
-- Row Level Security (RLS) on all database tables
-- JWT-based authentication
-- Secure password hashing
-- User data isolation
-- XSS and injection prevention
-
-## Contributing
-
-Contributions are welcome! Please check the code for extension points and submit pull requests.
+- Row Level Security (RLS) enforced on all tables
+- Passwords hashed with bcrypt
+- JWT secret auto-generated and persisted in the database (overridable via `JWT_SECRET` env var)
+- Per-user data isolation throughout
 
 ## License
 
-MIT License
+MIT
